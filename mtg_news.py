@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Collect official MTG announcements; post each new article to one of two channels."""
 import argparse
+import copy
 import json
 import os
 import re
@@ -71,8 +72,8 @@ def post(webhook, item, label):
     parsed = urlsplit(webhook)
     if parsed.scheme != 'https' or parsed.hostname != 'discord.com' or not parsed.path.startswith('/api/webhooks/'):
         raise RuntimeError('Webhook must be an https://discord.com/api/webhooks/... URL.')
-    payload = {'embeds': [{'title': item['title'][:256], 'url': item['url'],
-                           'color': 0x9B59B6 if label == 'Secret Lair' else 0x3498DB}],
+    # A bare URL lets Discord generate its native article preview.
+    payload = {'content': item['url'],
                'allowed_mentions': {'parse': []}}
     data = json.dumps(payload).encode()
     content_type = 'application/json'
@@ -89,11 +90,46 @@ def post(webhook, item, label):
         raise RuntimeError('Discord delivery could not be confirmed; queued items retained. Check the channel before retrying.') from None
 
 
-def run(items, state, dry_run=False):
-    if not state:
+def additional_servers():
+    """Optional JSON secret; legacy webhook secrets remain the default server."""
+    raw = os.getenv('EXTRA_SERVERS_JSON', '').strip()
+    if not raw:
+        return []
+    try:
+        servers = json.loads(raw)
+    except ValueError:
+        raise RuntimeError('EXTRA_SERVERS_JSON must be a valid JSON array.') from None
+    if not isinstance(servers, list):
+        raise RuntimeError('EXTRA_SERVERS_JSON must be a JSON array.')
+    ids = set()
+    for server in servers:
+        if not isinstance(server, dict):
+            raise RuntimeError('Each extra server must be a JSON object.')
+        name = server.get('id')
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name) or name == 'default' or name in ids:
+            raise RuntimeError('Extra server IDs must be unique, 1–64 letters/digits/_/-, and not "default".')
+        ids.add(name)
+        for key in ('mtg_webhook', 'secret_lair_webhook'):
+            value = server.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise RuntimeError(f'Extra server {name} needs both webhook URLs.')
+            try:
+                parsed = urlsplit(value)
+                valid = (parsed.scheme == 'https' and parsed.hostname == 'discord.com'
+                         and parsed.path.startswith('/api/webhooks/')
+                         and not parsed.username and not parsed.password)
+            except ValueError:
+                valid = False
+            if not valid:
+                raise RuntimeError(f'Extra server {name} has an invalid {key} URL.')
+    return servers
+
+
+def run_server(items, state, webhooks, persist, dry_run=False):
+    if 'seen' not in state:
         state.update({'seen': [i['url'] for i in items], 'pending': []})
         if not dry_run:
-            save(state)
+            persist()
         print(f'Initialized with {len(items)} existing announcements. Future announcements will be posted.')
         return 0
     seen = set(state['seen'])
@@ -103,7 +139,7 @@ def run(items, state, dry_run=False):
             state['seen'].append(item['url'])
             seen.add(item['url'])
     if not dry_run:
-        save(state)
+        persist()
     print(f'{len(state["pending"])} announcements queued.')
     failures = 0
     # Source is newest first; deliver older items first within each channel.
@@ -117,9 +153,9 @@ def run(items, state, dry_run=False):
             continue
         if not selected:
             continue
-        webhook = os.getenv(secret)
+        webhook = webhooks.get(channel)
         if not webhook:
-            print(f'Missing GitHub secret: {secret}', file=sys.stderr)
+            print(f'Missing webhook for {channel} ({secret} on the default server).', file=sys.stderr)
             failures += 1
             continue
         for item in reversed(selected):
@@ -130,8 +166,31 @@ def run(items, state, dry_run=False):
                 failures += 1
                 break
             state['pending'] = [i for i in state['pending'] if i['url'] != item['url']]
-            save(state)
+            persist()
             print(f'Delivered: {item["title"]}')
+    return int(bool(failures))
+
+
+def run(items, state, dry_run=False):
+    # Validate configuration before touching history. Keep the original top-level
+    # seen/pending lists so upgrades and existing single-server tests still work.
+    extras = additional_servers()
+    if dry_run:
+        state = copy.deepcopy(state)
+    persist = lambda: save(state)
+    print('Server: default')
+    failures = run_server(items, state, {
+        'general': os.getenv('MTG_WEBHOOK'),
+        'secret_lair': os.getenv('SECRET_LAIR_WEBHOOK'),
+    }, persist, dry_run)
+    for server in extras:
+        name = server['id']
+        history = state.setdefault('servers', {}).setdefault(name, {})
+        print(f'Server: {name}')
+        failures += run_server(items, history, {
+            'general': server['mtg_webhook'],
+            'secret_lair': server['secret_lair_webhook'],
+        }, persist, dry_run)
     return int(bool(failures))
 
 

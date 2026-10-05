@@ -3,6 +3,9 @@
 Checks Wizards' announcements page every 30 minutes and posts each new title
 with its official link. Titles containing "Secret Lair" or "Chaos Vault" (case-insensitive) go
 into a separate channel. All other announcements go to `#mtg`.
+Posts use a plain URL so Discord can generate the article's native preview
+(description and image, when available). Preview rendering is controlled by
+Discord and the website's metadata.
 No Python packages, paid services, or AI needed.
 
 ## Setup
@@ -26,6 +29,58 @@ No Python packages, paid services, or AI needed.
 
 Future announcements post on the next check. GitHub scheduling can delay runs;
 this is near-real-time polling, not instant delivery.
+
+## Upgrade an existing installation
+
+Replace `mtg_news.py` and `.github/workflows/mtg-news.yml`, then commit and push.
+Keep your existing `state.json`, `MTG_WEBHOOK`, and `SECRET_LAIR_WEBHOOK` secrets.
+The original server continues working without any configuration changes or
+history reset. The plain-URL previews and Chaos Vault routing are included.
+
+## Add more servers (optional)
+
+Create the two channels and webhooks in each additional Discord server. In
+your existing GitHub repository, add one Actions secret named
+`EXTRA_SERVERS_JSON` containing an array like this:
+
+```json
+[
+  {
+    "id": "friends",
+    "mtg_webhook": "https://discord.com/api/webhooks/REPLACE_WITH_MTG_WEBHOOK",
+    "secret_lair_webhook": "https://discord.com/api/webhooks/REPLACE_WITH_SECRET_LAIR_WEBHOOK"
+  },
+  {
+    "id": "game-club",
+    "mtg_webhook": "https://discord.com/api/webhooks/REPLACE_WITH_MTG_WEBHOOK",
+    "secret_lair_webhook": "https://discord.com/api/webhooks/REPLACE_WITH_SECRET_LAIR_WEBHOOK"
+  }
+]
+```
+
+Use the full copied webhook URLs in place of those examples. Delete the second
+object if adding only one server. Don't include the original server here;
+it still uses the two existing secrets. Each extra server needs its own pair
+of webhooks. Never paste the real JSON into a public repository file.
+
+The `id` is a nickname you choose, not a Discord server ID. Keep it stable;
+it connects that server to its delivery history. Updating a webhook URL under
+the same ID preserves that history. Reusing an ID for a different server also
+reuses its history, so use a new ID for a genuinely new server.
+
+Run the workflow once after adding a server. Its first run marks currently
+visible headlines as seen, then future posts arrive automatically. To test an
+extra server, remove one URL from `servers.<id>.seen` inside `state.json` and
+run the workflow again. The original server still uses the top-level `seen`.
+
+Each server has its own queue. Successful deliveries are removed only from
+that server's queue; failures elsewhere do not cause repeats there. Removing
+a server from the secret stops its posts but retains its saved history. Re-adding
+the same ID resumes any queued messages and discovers currently visible new
+articles; articles that left the source page while disabled may be missed.
+
+Leaving `EXTRA_SERVERS_JSON` absent, blank, or `[]` uses just the original server.
+Malformed extra-server JSON fails visibly before sending or changing history.
 
 ## Test a current article
 

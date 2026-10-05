@@ -25,6 +25,7 @@ jobs:
         env:
           MTG_WEBHOOK: ${{ secrets.MTG_WEBHOOK }}
           SECRET_LAIR_WEBHOOK: ${{ secrets.SECRET_LAIR_WEBHOOK }}
+          EXTRA_SERVERS_JSON: ${{ secrets.EXTRA_SERVERS_JSON }}
         run: python mtg_news.py
       - name: Preserve queue and delivery history
         if: always()
