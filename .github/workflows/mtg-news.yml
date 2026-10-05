@@ -2,7 +2,7 @@ name: MTG announcements
 
 on:
   schedule:
-    - cron: '7,37 * * * *' # Check every 30 minutes
+    - cron: '7 * * * *'
   workflow_dispatch:
 
 permissions:
