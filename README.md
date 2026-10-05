@@ -3,6 +3,7 @@
 Checks Wizards' announcements page every 30 minutes and posts each new title
 with its official link. Titles containing "Secret Lair" or "Chaos Vault" (case-insensitive) go
 into a separate channel. All other announcements go to `#mtg`.
+No Python packages, paid services, or AI needed.
 
 ## Setup
 
